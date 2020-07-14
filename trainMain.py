@@ -77,7 +77,7 @@ if __name__ == "__main__":
                 optimizer.step()
                 _trainCount += 1
                 if _trainCount % 500 == 0 and _trainCount > 10:
-                        torch.save(net.state_dict(), "yoloParam%d.dict" % _trainCount)
+                    torch.save(net.state_dict(), "yoloParam%d.dict" % _trainCount)
     elif MODE is "predict":
         fileName = 'img.jpg'
         net.eval()
@@ -87,6 +87,6 @@ if __name__ == "__main__":
         pred = torch.cat(out, dim=1).cpu()
         detections = utils.non_max_suppression(pred, 0.6, 0.4)[0]
         a, label = torch.split(detections, [6, 1], dim=1)
-        label = torch.cat([torch.zeros(label.shape[0],1),label,a],dim=1)
+        label = torch.cat([torch.zeros(label.shape[0], 1), label, a], dim=1)
         label[:, 2:6] = utils.xyxy2xywh(label[:, 2:6])/options.imgSquareSize
         imgUtils.showImgNLab(img[0], label)

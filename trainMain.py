@@ -71,7 +71,8 @@ if __name__ == "__main__":
                 labels = (Variable(torch.cat(labels, dim=0).to(device)) if labels != [] else
                         Variable(torch.FloatTensor(0, 6).to(device)))
                 out, loss = net(inputs, labels)
-                print(_trainCount, loss.item())
+                if _trainCount % 100 == 0:
+                    print(_trainCount, loss.item())
                 loss.backward()
                 optimizer.step()
                 _trainCount += 1

@@ -17,14 +17,14 @@ def xyxy2xywh(x):
     y[...,3]=x[...,3]-x[...,1] 
     return y
 
-def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
+def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4, cuda='cuda:1'):
     """
     Removes detections with lower object confidence score than 'conf_thres' and performs
     Non-Maximum Suppression to further filter detections.
     Returns detections with shape:
         (x1, y1, x2, y2, object_conf, class_score, class_pred)
     """
-
+    device = torch.device(cuda if torch.cuda.is_available() else 'cpu')
     # From (center x, center y, width, height) to (x1, y1, x2, y2)
     prediction[..., :4] = xywh2xyxy(prediction[..., :4])
     output = [None for _ in range(len(prediction))]
@@ -37,13 +37,13 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
         # Object confidence times class confidence
         score = image_pred[:, 4] * image_pred[:, 5:].max(1)[0]
         # Sort by it
-        #image_pred = image_pred[(-score).argsort()]
+        # image_pred = image_pred[(-score).argsort()]
         class_confs, class_preds = image_pred[:, 5:].max(1, keepdim=True)
         detections = torch.cat((image_pred[:, :5], class_confs.float(), class_preds.float()), 1)
         # Perform non-maximum suppression
         keep_boxes = []
         while detections.size(0):
-            large_overlap = bbox_iou(detections[0, :4].unsqueeze(0), detections[:, :4]) > nms_thres
+            large_overlap = bbox_iou(detections[0, :4].unsqueeze(0), detections[:, :4], cuda) > nms_thres
             label_match = detections[0, -1] == detections[:, -1]
             # Indices of boxes with lower confidence scores, large IOUs and matching labels
             invalid = large_overlap & label_match
@@ -66,10 +66,11 @@ def bbox_wh_iou(wh1, wh2):
     return inter_area / union_area
 
 
-def bbox_iou(box1, box2, x1y1x2y2=True):
+def bbox_iou(box1, box2, x1y1x2y2=True, cuda="cuda:1"):
     """
     Returns the IoU of two bounding boxes
     """
+    device = torch.device(cuda if torch.cuda.is_available() else 'cpu')
     if not x1y1x2y2:
         # Transform from center and width to exact coordinates
         b1_x1, b1_x2 = box1[:, 0] - box1[:, 2] / 2, box1[:, 0] + box1[:, 2] / 2
@@ -82,14 +83,13 @@ def bbox_iou(box1, box2, x1y1x2y2=True):
         b2_x1, b2_y1, b2_x2, b2_y2 = box2[:, 0], box2[:, 1], box2[:, 2], box2[:, 3]
 
     # get the corrdinates of the intersection rectangle
-    inter_rect_x1 = torch.max(b1_x1, b2_x1)
-    inter_rect_y1 = torch.max(b1_y1, b2_y1)
-    inter_rect_x2 = torch.min(b1_x2, b2_x2)
-    inter_rect_y2 = torch.min(b1_y2, b2_y2)
+    inter_rect_x1 = torch.max(b1_x1, b2_x1).to(device)
+    inter_rect_y1 = torch.max(b1_y1, b2_y1).to(device)
+    inter_rect_x2 = torch.min(b1_x2, b2_x2).to(device)
+    inter_rect_y2 = torch.min(b1_y2, b2_y2).to(device)
     # Intersection area
     inter_area = torch.clamp(inter_rect_x2 - inter_rect_x1 + 1, min=0) * torch.clamp(
-        inter_rect_y2 - inter_rect_y1 + 1, min=0
-    )
+        inter_rect_y2 - inter_rect_y1 + 1, min=0)
     # Union Area
     b1_area = (b1_x2 - b1_x1 + 1) * (b1_y2 - b1_y1 + 1)
     b2_area = (b2_x2 - b2_x1 + 1) * (b2_y2 - b2_y1 + 1)
@@ -98,10 +98,12 @@ def bbox_iou(box1, box2, x1y1x2y2=True):
 
     return iou
 
-def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
-    #Note:pred_boxes (b,box,grid,grid,4) storing x,y,w,h in grid space
-    #Note:pred_cls (b,box,grid,grid,numClass)
-    #Note:targets (sample boxes(num represents img index), t_id_x_y_w_h) in norm space
+
+def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres, cuda):
+    # Note:pred_boxes (b,box,grid,grid,4) storing x,y,w,h in grid space
+    # Note:pred_cls (b,box,grid,grid,numClass)
+    # Note:targets (sample boxes(num represents img index), t_id_x_y_w_h) in norm space
+    device = torch.device(cuda if torch.cuda.is_available() else 'cpu')
 
     ByteTensor = torch.cuda.ByteTensor if pred_boxes.is_cuda else torch.ByteTensor
     FloatTensor = torch.cuda.FloatTensor if pred_boxes.is_cuda else torch.FloatTensor
@@ -112,24 +114,24 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     nG = pred_boxes.size(2)
 
     # Output tensors
-    obj_mask = ByteTensor(nB, nA, nG, nG).fill_(0)
-    noobj_mask = ByteTensor(nB, nA, nG, nG).fill_(1)
-    class_mask = FloatTensor(nB, nA, nG, nG).fill_(0)
-    iou_scores = FloatTensor(nB, nA, nG, nG).fill_(0)
-    tx = FloatTensor(nB, nA, nG, nG).fill_(0)
-    ty = FloatTensor(nB, nA, nG, nG).fill_(0)
-    tw = FloatTensor(nB, nA, nG, nG).fill_(0)
-    th = FloatTensor(nB, nA, nG, nG).fill_(0)
-    tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0)
+    obj_mask = ByteTensor(nB, nA, nG, nG, device=cuda).fill_(0)
+    noobj_mask = ByteTensor(nB, nA, nG, nG, device=cuda).fill_(1)
+    class_mask = FloatTensor(nB, nA, nG, nG, device=cuda).fill_(0)
+    iou_scores = FloatTensor(nB, nA, nG, nG).fill_(0).to(device)
+    tx = FloatTensor(nB, nA, nG, nG).fill_(0).to(device)
+    ty = FloatTensor(nB, nA, nG, nG).fill_(0).to(device)
+    tw = FloatTensor(nB, nA, nG, nG).fill_(0).to(device)
+    th = FloatTensor(nB, nA, nG, nG).fill_(0).to(device)
+    tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0).to(device)
 
     # Convert to position relative to box
-    target_boxes = target[:, 2:6] * nG #Note: convert to grid space, (sample boxes, x_y_w_h)
-    gxy = target_boxes[:, :2]  #Note: (sample boxes, x_y)
-    gwh = target_boxes[:, 2:]  #Note: (sample boxes, w_h)
+    target_boxes = target[:, 2:6] * nG  # Note: convert to grid space, (sample boxes, x_y_w_h)
+    gxy = target_boxes[:, :2]  # Note: (sample boxes, x_y)
+    gwh = target_boxes[:, 2:]  # Note: (sample boxes, w_h)
     # Get anchors with best iou
-    ious = torch.stack([bbox_wh_iou(anchor, gwh) for anchor in anchors])#Note: bbox_wh_iou calc for vec
-    #ious (num anchors, num sample boxes)
-    if ious.shape[1]>0:
+    ious = torch.stack([bbox_wh_iou(anchor, gwh) for anchor in anchors])    # Note: bbox_wh_iou calc for vec
+    # ious (num anchors, num sample boxes)
+    if ious.shape[1] > 0:
         best_ious, best_n = ious.max(0)
         # Separate target values
         b, target_labels = target[:, :2].long().t()

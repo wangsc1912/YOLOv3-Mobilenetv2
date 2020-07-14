@@ -20,7 +20,8 @@ import torch
 import imgUtils
 import utils
 
-MODE="train"
+MODE = "train"
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -33,19 +34,21 @@ def parse_args():
     
     parser.add_argument('--imgSquareSize', type=int, default=416,
                         help='Padded squared image size length')
-    parser.add_argument('--batchSize', type=int, default=2,
+    parser.add_argument('--batchSize', type=int, default=48,
                         help='Batch size')
     parser.add_argument('--pretrainedParamFile', type=str, default="yoloParam.dict",
                         help='Pretrained parameter file')
+    parser.add_argument('--device', type=str, default='cuda:1', help='Choose cuda device')
     args = parser.parse_args()
     return args
 
-if __name__=="__main__":
-    options=parse_args()
+
+if __name__ == "__main__":
+    options = parse_args()
     
-    trainDataSet=dataset.ListDataset(options)
-    device = torch.device("cuda:0" if torch.cuda.is_available()  else "cpu")
-    net=model.objDetNet(options)
+    trainDataSet = dataset.ListDataset(options)
+    device = torch.device(options.device if torch.cuda.is_available() else "cpu")
+    net = model.objDetNet(options)
     net.to(device)
     net.loadPretrainedParams()
     
@@ -58,39 +61,31 @@ if __name__=="__main__":
                 pin_memory=True,
                 collate_fn=trainDataSet.collate_fn
             )
-        optimizer=optim.Adam(net.parameters(),lr=0.001,eps=1e-3)
-        _trainCount=0
-        for _ in range(10000):
-            print("======New Epoch=======")
-            for inputs,labels in dataloaderTrain:
+        optimizer = optim.Adam(net.parameters(), lr=0.001, eps=1e-3)
+        _trainCount = 0
+        for i in range(10000):
+            print("====== Epoch %3d =======" % i)
+            for inputs, labels in dataloaderTrain:
                 optimizer.zero_grad()
-                inputs=Variable(inputs.to(device))
-                labels=(Variable(torch.cat(labels,dim=0).to(device)) if labels!=[] else 
-                        Variable(torch.FloatTensor(0,6).to(device)))
-                out,loss=net(inputs,labels)
-                print(_trainCount,loss.item())
+                inputs = Variable(inputs.to(device))
+                labels = (Variable(torch.cat(labels, dim=0).to(device)) if labels != [] else
+                        Variable(torch.FloatTensor(0, 6).to(device)))
+                out, loss = net(inputs, labels)
+                print(_trainCount, loss.item())
                 loss.backward()
                 optimizer.step()
-                _trainCount+=1
-                if _trainCount%500==0 and _trainCount>10:
-                        torch.save(net.state_dict(),"yoloParam%d.dict"%_trainCount)
+                _trainCount += 1
+                if _trainCount % 500 == 0 and _trainCount > 10:
+                        torch.save(net.state_dict(), "yoloParam%d.dict" % _trainCount)
     elif MODE is "predict":
-        fileName='img.jpg'
+        fileName = 'img.jpg'
         net.eval()
-        img=Variable(trainDataSet.imgRead(fileName).unsqueeze(0).to(device))
+        img = Variable(trainDataSet.imgRead(fileName).unsqueeze(0).to(device))
         with torch.no_grad():
-            out,_=net(img)
-        pred=torch.cat(out,dim=1).cpu()
+            out, _ = net(img)
+        pred = torch.cat(out, dim=1).cpu()
         detections = utils.non_max_suppression(pred, 0.6, 0.4)[0]
-        a,label=torch.split(detections,[6,1],dim=1)
-        label=torch.cat([torch.zeros(label.shape[0],1),label,a],dim=1)
-        label[:,2:6]=utils.xyxy2xywh(label[:,2:6])/options.imgSquareSize
-        imgUtils.showImgNLab(img[0],label)
-        
-    
-    
-                    
-                    
-            
-        
-    
+        a, label = torch.split(detections, [6, 1], dim=1)
+        label = torch.cat([torch.zeros(label.shape[0],1),label,a],dim=1)
+        label[:, 2:6] = utils.xyxy2xywh(label[:, 2:6])/options.imgSquareSize
+        imgUtils.showImgNLab(img[0], label)

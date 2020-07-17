@@ -56,7 +56,7 @@ class yoloOutputAndLoss(nn.Module):
         h = prediction[..., 3]
         predConf = torch.sigmoid(prediction[..., 4])
         # Note: x,y,w,h,predConf -> (b,box,grid,grid)
-        predCls=torch.sigmoid(prediction[...,5:])#Question: use sigmoid?
+        predCls=torch.sigmoid(prediction[...,5:])   # Question: use sigmoid?
         # Note: predCls -> (b,box,grid,grid,numClass)
         
         # Convert to grid space
@@ -105,7 +105,7 @@ class objDetNet(nn.Module):
         super(objDetNet, self).__init__()
         self._opt = opt
         
-        self.conv0=conv_bn(3, 32, 2)     # 416->208
+        self.conv0=conv_bn(1, 32, 2)     # 416->208
         self.conv1=InvertedResidual(32,16,1,1)
         self.conv2=nn.Sequential(InvertedResidual(16,24,2,6),InvertedResidual(24,24,1,6))   # 208->104
         self.conv3=nn.Sequential(InvertedResidual(24,32,2,6),InvertedResidual(32,32,1,6)
@@ -118,26 +118,26 @@ class objDetNet(nn.Module):
                                 ,InvertedResidual(160,160,1,6))     # 26->13
         
         self.convEx1=_extendedLayers(160,512)
-        self.convOt1=_outputLayers(512,85*3)
+        self.convOt1=_outputLayers(512,6*3)
         
         self.convUp1=nn.Sequential(conv_1x1_bn(512, 256),nn.ConvTranspose2d(256,256,3,2,1,1,256))
         
         self.convEx2=_extendedLayers(320,256)
-        self.convOt2=_outputLayers(256,85*3)
+        self.convOt2=_outputLayers(256,6*3)
         self.convUp2=nn.Sequential(conv_1x1_bn(256, 128),nn.ConvTranspose2d(128,128,3,2,1,1,128))
         
         self.convEx3=_extendedLayers(160,256)
-        self.convOt3=_outputLayers(256,85*3)
+        self.convOt3=_outputLayers(256,6*3)
 
-        self.yolo13 = yoloOutputAndLoss([(116, 90), (156, 198), (373, 326)], 80, self._opt.imgSquareSize, self._opt)
-        self.yolo26=yoloOutputAndLoss([(30, 61), (62, 45), (59, 119)],80,self._opt.imgSquareSize, self._opt)
-        self.yolo52=yoloOutputAndLoss([(10, 13), (16, 30), (33, 23)],80,self._opt.imgSquareSize, self._opt)
+        self.yolo13 = yoloOutputAndLoss([(116, 90), (156, 198), (373, 326)], 1, self._opt.imgSquareSize, self._opt)
+        self.yolo26=yoloOutputAndLoss([(30, 61), (62, 45), (59, 119)], 1, self._opt.imgSquareSize, self._opt)
+        self.yolo52=yoloOutputAndLoss([(10, 13), (16, 30), (33, 23)], 1, self._opt.imgSquareSize, self._opt)
         
     def loadPretrainedParams(self):
         deviceBool = next(self.parameters()).is_cuda
-        device=torch.device(self._opt.device if deviceBool else "cpu")
+        device = torch.device(self._opt.device if deviceBool else "cpu")
         try:
-            pretrainedDict = torch.load(self._opt.pretrainedParamFile,map_location=device.type)
+            pretrainedDict = torch.load(self._opt.pretrainedParamFile, map_location=device.type)
             modelDict=self.state_dict()
             pretrainedDict = {k: v for k, v in pretrainedDict.items() if k in modelDict}
             modelDict.update(pretrainedDict)
@@ -145,28 +145,28 @@ class objDetNet(nn.Module):
         except:
             print("Can't load pre-trained parameter files")
 
-    def forward(self,x,target=None):
-        x = self.conv0(x)
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
+    def forward(self,x,target=None):    # input x: [48, 3, 416, 416]        target: [96, 6]
+        x = self.conv0(x)   # [48, 32, 208, 208]
+        x = self.conv1(x)   # [48, 16, 208, 208]
+        x = self.conv2(x)   # [48, 24, 104, 104]
+        x = self.conv3(x)   # [48, 32, 52, 52]
         xR2 = x
-        x = self.conv4(x)
+        x = self.conv4(x)   # [48, 64 26, 26]
         xR1 = x
-        x = self.conv5(x)
-        x = self.conv6(x)
-        x = self.convEx1(x)
-        xOt1 = self.convOt1(x)
-        x = self.convUp1(x)
-        x = torch.cat([x, xR1], dim=1)
+        x = self.conv5(x)   # [48, 96,26, 26]
+        x = self.conv6(x)   # [48, 160, 13, 13]
+        x = self.convEx1(x)     # [48, 512, 13, 13]
+        xOt1 = self.convOt1(x)  # [48, 255, 13, 13]
+        x = self.convUp1(x)     # [48, 256, 26, 26]
+        x = torch.cat([x, xR1], dim=1)      # [48, 320, 26, 26]
         
-        x = self.convEx2(x)
-        xOt2 = self.convOt2(x)
-        x = self.convUp2(x)
-        x = torch.cat([x, xR2], dim=1)
+        x = self.convEx2(x)     # [48, 256, 26, 26]
+        xOt2 = self.convOt2(x)      # [48, 255, 26, 26]
+        x = self.convUp2(x)         # [48, 128, 52, 52]
+        x = torch.cat([x, xR2], dim=1)      # [48, 160, 52, 52]
         
-        x = self.convEx3(x)
-        xOt3 = self.convOt3(x)
+        x = self.convEx3(x)     # [48, 256, 52, 52]
+        xOt3 = self.convOt3(x)      # [48, 255, 52, 52]
         
         out13, loss13 = self.yolo13(xOt1, target)
         out26, loss26 = self.yolo26(xOt2, target)

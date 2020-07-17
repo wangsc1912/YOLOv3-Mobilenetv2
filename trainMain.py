@@ -14,7 +14,7 @@ import numpy as np
 import argparse
 import dataset
 import model_sum as model
-
+import time
 import matplotlib.pyplot as plt
 import torch
 import imgUtils
@@ -36,9 +36,10 @@ def parse_args():
                         help='Padded squared image size length')
     parser.add_argument('--batchSize', type=int, default=48,
                         help='Batch size')
-    parser.add_argument('--pretrainedParamFile', type=str, default="yoloParam.dict",
+    parser.add_argument('--pretrainedParamFile', type=str, default="best0717a.dict",
                         help='Pretrained parameter file')
-    parser.add_argument('--device', type=str, default='cuda:1', help='Choose cuda device')
+    parser.add_argument('--device', type=str, default='cpu', help='Choose cuda device')
+    parser.add_argument('--mode', type=str, default='predict', help='Choose train/test mode')
     args = parser.parse_args()
     return args
 
@@ -48,11 +49,13 @@ if __name__ == "__main__":
     
     trainDataSet = dataset.ListDataset(options)
     device = torch.device(options.device if torch.cuda.is_available() else "cpu")
+    # network and loss
     net = model.objDetNet(options)
     net.to(device)
+    # load model parameters
     net.loadPretrainedParams()
-    
-    if MODE is "train":
+
+    if options.mode is "train":
         dataloaderTrain = DataLoader(
                 trainDataSet,
                 batch_size=options.batchSize,
@@ -62,9 +65,13 @@ if __name__ == "__main__":
                 collate_fn=trainDataSet.collate_fn
             )
         optimizer = optim.Adam(net.parameters(), lr=0.001, eps=1e-3)
-        _trainCount = 0
+
+        _loss_list = []
         for i in range(10000):
+            t0 = time.time()
             print("====== Epoch %3d =======" % i)
+            epoch_loss = 0
+            _trainCount = 0
             for inputs, labels in dataloaderTrain:
                 optimizer.zero_grad()
                 inputs = Variable(inputs.to(device))
@@ -74,19 +81,26 @@ if __name__ == "__main__":
                 if _trainCount % 100 == 0:
                     print(_trainCount, loss.item())
                 loss.backward()
+
+                epoch_loss += loss
                 optimizer.step()
                 _trainCount += 1
-                if _trainCount % 500 == 0 and _trainCount > 10:
-                    torch.save(net.state_dict(), "yoloParam%d.dict" % _trainCount)
-    elif MODE is "predict":
-        fileName = 'img.jpg'
+                _loss_list.append(epoch_loss)
+            if epoch_loss <= min(_loss_list):
+                torch.save(net.state_dict(), "best0717a.dict")
+            torch.save(net.state_dict(), "last0717a.dict")
+    elif options.mode is "predict":
+        fileName = 'face9.jpg'
         net.eval()
         img = Variable(trainDataSet.imgRead(fileName).unsqueeze(0).to(device))
         with torch.no_grad():
             out, _ = net(img)
         pred = torch.cat(out, dim=1).cpu()
-        detections = utils.non_max_suppression(pred, 0.6, 0.4)[0]
-        a, label = torch.split(detections, [6, 1], dim=1)
-        label = torch.cat([torch.zeros(label.shape[0], 1), label, a], dim=1)
-        label[:, 2:6] = utils.xyxy2xywh(label[:, 2:6])/options.imgSquareSize
-        imgUtils.showImgNLab(img[0], label)
+        detections = utils.non_max_suppression(pred, options, 0.6, 0.4)[0]
+        if detections is not None:
+            a, label = torch.split(detections, [6, 1], dim=1)
+            label = torch.cat([torch.zeros(label.shape[0], 1), label, a], dim=1)
+            label[:, 2:6] = utils.xyxy2xywh(label[:, 2:6])/options.imgSquareSize
+            imgUtils.showImgNLab(img[0], label)
+        else:
+            print('\nNo eye detected.')

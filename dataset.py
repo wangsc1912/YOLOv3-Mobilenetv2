@@ -16,17 +16,19 @@ class ListDataset(Dataset):
         self.datasetDir = self._opt.trainDatasetDirectory
         self.datasetLabelDir = self._opt.trainDatasetLabelDirectory
         self.imgDataList = filSt
-        self.labelDataList = [f.replace(".jpg",".txt") for f in filSt]
+        a = filSt[1].replace(".png", ".txt").replace(".jpg", ".txt")
+        self.labelDataList = [f.replace(".jpg", ".txt").replace(".png", ".txt") for f in filSt]
         self._len = len(filSt)
         self.randomize = True
     
     def imgRead(self, fileName):
-        img = transforms.ToTensor()(Image.open(fileName).convert('RGB'))
+        # img = transforms.ToTensor()(Image.open(fileName).convert('RGB'))
+        img = transforms.ToTensor()(Image.open(fileName).convert('L'))      # .repeat(3, 1, 1)
         return imgUtils.imgTransformSingleImg(img, 0, 0.5, 0.5, self._opt.imgSquareSize)[0]
 
     def __getitem__(self, index):
         if self.randomize:
-            # flip or not?
+            # flip or not?c
             _flipFlag = random.choice([0, 1])
             # randomize padding
             _hr, _wr = random.random(), random.random()
@@ -34,9 +36,9 @@ class ListDataset(Dataset):
             _flipFlag, _hr, _wr = 0, 0.5, 0.5
         if not self.imgDataList[index]:
             print('current data is: %s' % self.imgDataList[index])
-        img = transforms.ToTensor()(Image.open(self.datasetDir+self.imgDataList[index]).convert('RGB'))
+        img = transforms.ToTensor()(Image.open(self.datasetDir+self.imgDataList[index]).convert('L'))
         
-        img,pad,[ori_h, ori_w] = imgUtils.imgTransformSingleImg(img,_flipFlag,_hr,_wr,self._opt.imgSquareSize)
+        img, pad, [ori_h, ori_w] = imgUtils.imgTransformSingleImg(img, _flipFlag, _hr, _wr, self._opt.imgSquareSize)
         _, padded_h, padded_w = img.shape
         
         DataFlag = 1

@@ -40,7 +40,8 @@ def showImgNLab(imgT,labT,mode=1,scale=None):
             imgT[:,downY:downY+2,leftX:rightX].fill_(1.)
             imgT[:,upY:downY,leftX:leftX+2].fill_(1.)
             imgT[:,upY:downY,rightX:rightX+2].fill_(1.)
-        plt.imshow(imgT.permute(1, 2, 0).cpu().numpy())
+        # plt.imshow(imgT.permute(1, 2, 0).cpu().numpy())
+        plt.imsave("prediction.jpg", imgT.permute(1, 2, 0).repeat(1, 1, 3).cpu().numpy())
             
 
 def frameIndicesForIntendedFps(startClip,numOfClips,intendedFrameRate, vidFrameRate):
@@ -53,12 +54,12 @@ def imgTransformSingleImg(img,flipFlag,padHeightRatio,padWidthRatio,squareSize):
         _frame = img.flip(2)
     else: 
         _frame = img
-    maxDim=max(_frame.shape[1],_frame.shape[2])
-    _frame = F.interpolate(_frame.unsqueeze(0),scale_factor=squareSize/maxDim,mode="nearest")[0]
+    maxDim=max(_frame.shape[1], _frame.shape[2])
+    _frame = F.interpolate(_frame.unsqueeze(0), scale_factor=squareSize/maxDim, mode="nearest")[0]
     _, orih, oriw = _frame.shape
-    _frame,pad = padImg2SquareArbitrary(_frame,padHeightRatio,padWidthRatio)
-    _frame = ImgTSquareResize(_frame,squareSize)
-    return _frame,pad,[orih,oriw]
+    _frame, pad = padImg2SquareArbitrary(_frame, padHeightRatio, padWidthRatio)
+    _frame = ImgTSquareResize(_frame, squareSize)
+    return _frame, pad, [orih, oriw]
 
 
 def findOverlappedlength(left1,right1,left2,right2):

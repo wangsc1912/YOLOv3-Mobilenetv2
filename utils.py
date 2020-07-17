@@ -1,4 +1,5 @@
 import torch
+import time
 
 
 def xywh2xyxy(x):
@@ -9,6 +10,7 @@ def xywh2xyxy(x):
     y[...,3]=x[...,1]+x[...,3]/2
     return y
 
+
 def xyxy2xywh(x):
     y=x.new(x.shape)
     y[...,0]=(x[...,0]+x[...,2])/2
@@ -17,14 +19,16 @@ def xyxy2xywh(x):
     y[...,3]=x[...,3]-x[...,1] 
     return y
 
-def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4, cuda='cuda:1'):
+
+def non_max_suppression(prediction, options, conf_thres=0.5, nms_thres=0.4):
     """
     Removes detections with lower object confidence score than 'conf_thres' and performs
     Non-Maximum Suppression to further filter detections.
     Returns detections with shape:
         (x1, y1, x2, y2, object_conf, class_score, class_pred)
     """
-    device = torch.device(cuda if torch.cuda.is_available() else 'cpu')
+
+    device = torch.device(options.device)
     # From (center x, center y, width, height) to (x1, y1, x2, y2)
     prediction[..., :4] = xywh2xyxy(prediction[..., :4])
     output = [None for _ in range(len(prediction))]
@@ -43,7 +47,7 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4, cuda='cuda:1'
         # Perform non-maximum suppression
         keep_boxes = []
         while detections.size(0):
-            large_overlap = bbox_iou(detections[0, :4].unsqueeze(0), detections[:, :4], cuda) > nms_thres
+            large_overlap = bbox_iou(detections[0, :4].unsqueeze(0), detections[:, :4], options.device) > nms_thres
             label_match = detections[0, -1] == detections[:, -1]
             # Indices of boxes with lower confidence scores, large IOUs and matching labels
             invalid = large_overlap & label_match
@@ -66,11 +70,11 @@ def bbox_wh_iou(wh1, wh2):
     return inter_area / union_area
 
 
-def bbox_iou(box1, box2, x1y1x2y2=True, cuda="cuda:1"):
+def bbox_iou(box1, box2, x1y1x2y2=True, cuda='cpu'):
     """
     Returns the IoU of two bounding boxes
     """
-    device = torch.device(cuda if torch.cuda.is_available() else 'cpu')
+    device = torch.device(cuda)
     if not x1y1x2y2:
         # Transform from center and width to exact coordinates
         b1_x1, b1_x2 = box1[:, 0] - box1[:, 2] / 2, box1[:, 0] + box1[:, 2] / 2
@@ -156,7 +160,7 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres, cuda):
         tcls[b, best_n, gj, gi, target_labels] = 1
         # Compute label correctness and iou at best anchor
         class_mask[b, best_n, gj, gi] = (pred_cls[b, best_n, gj, gi].argmax(-1) == target_labels).float()
-        iou_scores[b, best_n, gj, gi] = bbox_iou(pred_boxes[b, best_n, gj, gi], target_boxes, x1y1x2y2=False)
+        iou_scores[b, best_n, gj, gi] = bbox_iou(pred_boxes[b, best_n, gj, gi], target_boxes, x1y1x2y2=False, cuda=cuda)
     else:
         obj_mask[:] = 0
         noobj_mask[:] = 1
@@ -164,3 +168,8 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres, cuda):
 
     tconf = obj_mask.float()
     return iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf
+
+
+def time_synchronized():
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    return time.time()
